@@ -1,0 +1,249 @@
+analytic graphing.
+
+graphing = the activity of making graphs to show how different information is related
+
+Yule–Simpson effect:
+
+" a paradox in probability and statistics, in which a trend that appears in different groups of data disappears when these groups are combined."
+
+boxplot = the plot where the center line in box indicates median (50 percentile), lower end of box is 25 percentile and higher is 75th.
+
+File devices:
+
+Vector:
+
+-   pdf ( not efficient for many points but portable)
+
+-   svg (xml- based, useful for web-based content)
+
+Bitmap:
+
+-   png (Portable Network garphics, good for line drawings, solid colors, uses losless compression like old GIF format)
+
+-   jpeg (good for photographs or natural scenes, uses lossy compression so good for plots with many points)
+
+W can draw on different graphics devices: pdf, screen etc. They all have the int val assigned(bigger than 2) and you can choose between them, on which you want to draw or copy from one to another.
+
+# Different plotting systems
+
+## Base R system
+
+| The core plotting and graphics engine in R is encapsulated in two packages. The first is the graphics package which contains
+| plotting functions for the "base" system. The functions in this package include plot, hist, boxplot, barplot, etc. The
+| second package is grDevices which contains all the code implementing the various graphics devices, including X11, PDF,
+| PostScript, PNG, etc.
+| 
+
+|  You can't go backwards, though, say, if you need to readjust margins
+| or have misspelled a caption. A finished plot will be a series of R commands, so it's difficult to translate a finished plot
+| into a different system.
+
+``` r
+# plotting on x, y axis
+plot(cars$speed, cars$dist)
+# adding text on coordinates x,y and with specific text
+text(mean(cars$speed), max(cars$dist), "SWIRL rules!")
+
+# drawing histogram of Ozone col in the airquality dataset
+hist(airquality$Ozone)
+
+# drawing boxplot of Ozone column vals given Month vlaues on the xaxis, the data come form airquality dataset
+boxplot(Ozone~Month, airquality)
+
+# setting colors of ticks on axes and the labels color to red
+boxplot(Ozone~Month, airquality, xlab="Month", ylab="Ozone (ppb)",col.axis="blue",col.lab="red")
+
+# creating a scatter plot with with statement that enables as not to use dataset$col_name construction
+with(airquality, plot(Wind, Ozone))
+
+# adding a horizontal line to existing plot
+abline(h=12)
+
+# creating a host plot, breaks specifies how many buckets we want divide histogram into
+hist(ppm, col="green", breaks=100)
+
+# and adding the points where data points lay in each hist bar
+rug(ppm)
+
+# adding the vertical line of width 2 to the plot
+abline(v=12, lwd=2)
+
+# plotting several boxplots for pm25 given(xaxis) region
+boxplot(pm25~region, data=pollution, col="red")
+
+# adding colour as categorical value
+plot(pollution$latitude, ppm, col=pollution$region)
+```
+
+| The par() function is used to specify global graphics parameters that affect all plots in an R session. (Use dev.off or
+| plot.new to reset to the defaults.) These parameters can be overridden when specified as arguments to specific plotting
+| functions. These include las (the orientation of the axis labels on the plot), bg (background color), mar (margin size), oma
+| (outer margin size), mfrow and mfcol (number of plots per row, column).
+
+``` r
+# first creating a subset for the column of the dataset
+may <- airquality[airquality$Month == 5, ]
+may <- subset(airquality, Month==5)
+# you cann annotate additional points to existing plot
+points(may$Wind,may$Ozone,col="blue",pch=17)
+legend("topright",pch=c(17,8),col=c("blue","red"),legend=c("May","Other Months"))
+```
+
+## Lattice System
+
+Here we cannot edit the plot with several commands. We do the whole plot in one.
+
+Usually we have the syntax like this:
+
+xyplot(Y-axis \~ X-axis, dataset_from, \*other_args)
+
+``` r
+# setting the red asterisks( check ?par for points' shapes integer indicators )
+xyplot(Ozone ~ Wind, data = airquality, pch=8, col="red", main="Big Apple Data")
+
+xyplot(Life.Exp ~ Income | region, data = state, layout = c(4, 1))
+#| To do this we'll give xyplot 3 arguments. The first is the most complicated. It is this R formula, Life.Exp ~ Income |
+#| region, which indicates we're plotting life expectancy as it depends on income for each region. The second argument, data,
+#| is set equal to state. This allows us to use "Life.Exp" and "Income" in the formula instead of specifying the dataset state
+#| for each term (as in state$Income). The third argument, layout, is set equal to the two-long vector c(4,1). Run xyplot now
+#| with these three arguments.
+
+# Displayed and labeled each subplot with the month's integer, with layout specified
+xyplot(Ozone~Wind | as.factor(Month), data=airquality, layout=c(5,1)) 
+# the Month is a factor here
+
+# With c(2,2) we would have divided the plot differently
+
+# creating the plot of price given the carat val for each of the group for the combination of cut of the diamond and the color of the diamond
+xyplot(price~carat|color*cut, data=diamonds, strip=FALSE, pch=20, xlab=myxlab, ylab=myylab, main=mymain)
+
+# adding better colors to plots
+plot(x, y, pch=19, col=rgb(0, .5, .5, .3))
+# pch = print character (the character shape)
+# we use rgb with alpha channel so the dots are not flat one color but with shades
+```
+
+## ggplot2
+
+| Now for the last plotting system, ggplot2, which is a hybrid of the base and lattice systems. It automatically deals with spacing, text, titles (as Lattice does) but also allows you to annotate by "adding" to a plot (as Base does), so it's the best of both worlds.
+
+gg = grammar of graphics
+
+| A "grammar" of graphics means that ggplot2 contains building blocks with which you can create your own graphical objects. What are these basic components of ggplot2 plots? There are 7 of them.
+| Obviously, there's a DATA FRAME which contains the data you're trying to plot. Then the AESTHETIC \| MAPPINGS determine how data are mapped to color, size, etc. The GEOMS (geometric objects) are what you see in the plot (points, lines, shapes) and FACETS are the panels used in conditional plots.
+| There are 3 more. STATS are statistical transformations such as binning, quantiles, and smoothing which \| ggplot2 applies to the data. SCALES determine how data values are converted into visual values, such as \| colors or sizes. Finally, the plots are depicted on a COORDINATE SYSTEM.
+
+Without GEOMS we can't see data, they are used for visualizing (additionaly defining the type of visualization we want).
+
+``` r
+table(mpg$model)
+# Showing the number of unique values on the col model in the dataset
+
+ggplot(data = mpg, mapping = aes(x = displ, y = hwy)) + geom_point()
+# creating a plot out of dataset mpg with selected xy axis data via aes and adding
+# mapping = defines aesthetics (how data shows on chart)
+# geom_point = a layer that draws points as scatter plot (geom = geometry layer)
+
+# adding color to recognize groupd based on drv (drive type: rear, fron, all-wheel)
+ggplot(mpg, aes(displ, hwy, color = drv)) + geom_point()
+# we can group not by color but by panels:
+ggplot(mpg, aes(displ, hwy)) + geom_point() + facet_grid(. ~ drv) # grouping in columns and one row
+
+# adding greyish confidence intervals around plotted points
+ggplot(mpg, aes(displ, hwy, color = drv)) + geom_point() +geom_smooth()
+
+# creating the boxplot and dividing it into color groups so visually there will also be grouped data 
+ggplot(mpg, aes(drv, hwy, color = manufacturer)) + geom_boxplot()
+
+# creating a hstogram  of hwy with coloring groups based on drive type
+ggplot(mpg, aes(hwy, fill = drv)) + geom_histogram()
+# instead of color groups we use 3 panels: 3 rows X 1 col
+ggplot(mpg, aes(hwy)) + geom_histogram(binwidth = 2) + facet_grid(drv ~ .)
+
+# adding titel at the top of all the panels
+g+geom_point()+geom_smooth(method="lm")+facet_grid(. ~ drv)+ggtitle("Swirl Rules!")
+
+# simple scatter plot with nicer coloring
+g+geom_point(color="pink", size=4, alpha=1/2)
+# different shades of pink= result of the alpha aesthetic which you set to 1/2. This aesthetic tells ggplot how transparent the points should be. Darker circles indicate values hit by multiple data points.
+
+# here we color based on drive type
+g+geom_point(size=4, alpha=1/2, aes(color=drv))
+# The third is a call to the function aes with the argument color set equal to drv. Note that you MUST use the function aes since the color of the points is data dependent and not a constant as it was in the previous example.
+
+# adding labels/titles 
+g+geom_point(aes(color=drv))+labs(title="Swirl Rules!")+labs(x="Displacement", y="Hwy Mileage")
+
+# adding linear regression via smoorh with specific dashed type blue quite thick line
+g+geom_point(aes(color=drv), size=2, alpha=1/2)+geom_smooth(linewidth=4, linetype=3, method="lm", se=FALSE)
+
+# changing text font and background to be white instead of grey
+g+geom_point(aes(color=drv))+theme_bw(base_family = "sans")
+
+# in ggplot we can create the plot data object and then add layers to visualise these objects:
+g<-ggplot(data=testdat, aes(myx, myy))
+g+geom_line() # now it visualises
+g+geom_line()+coord_cartesian(ylim=c(-3,3)) #cutting the y-axis
+
+# creating the graphical object
+g<-ggplot(data=mpg, aes(displ, hwy, color=factor(year)))
+g+geom_point() #drawing
+g+geom_point()+facet_grid(drv~cyl, margins = TRUE) #subploting drv rows and cyl cols
+```
+
+# Some Dataset help functions
+
+``` r
+summary(pollution$pm25) 
+
+Min. 1st Qu. Median Mean 3rd Qu. Max. 
+3.383 8.549 10.047 9.836 11.356 18.441
+
+quantile(pollution$pm25)
+      0%       25%       50%       75%      100% 
+ 3.382626  8.548799 10.046697 11.356012 18.440731 
+ 
+# we only don't have the mean
+      
+# showing columns names of df
+names(dataset)
+
+# check the number of uniques values for this column (useful when it is categorical column)
+table(dataset$column)
+```
+
+| This shows us basic info about the pm25 data, namely its Minimum (0 percentile) and Maximum (100 percentile) values, and
+| three Quartiles of the data. These last indicate the pollution measures at which 25%, 50%, and 75% of the counties fall
+| below. In addition to these 5 numbers we see the Mean or average measure of particulate pollution across the 576 counties.
+
+``` r
+# creating a subset of the dataset with observations where region col = "east"
+east <- subset(pollution,region=="east") 
+
+# drawing a frequency histogram of different pm25 values for west subset regions only
+hist(subset(pollution, region=="west")$pm25, col = "green")
+
+# removing the neccessity of using the dataframe name before each column for plotting function thanks to with statement
+with(pollution, plot(latitude, pm25))
+
+# we cen check the cross junction of 2 columns and the number of data points for each combination
+table(diamonds$color, diamonds$cut)
+   Fair Good Very Good Premium Ideal
+  D  163  662      1513    1603  2834
+  E  224  933      2400    2337  3903
+  F  312  909      2164    2331  3826
+  G  314  871      2299    2924  4884
+  H  303  702      1824    2360  3115
+  I  175  522      1204    1428  2093
+  J  119  307       678     808   896
+
+| You got it!
+
+  |=======================================================================================                              |  75%
+| We see a 7 by 5 array with counts indicating how many diamonds in the data frame have a particular color and cut. From the
+| table, which is the most frequent combination?
+
+# use str function to describe the dataset
+str(mpg)
+  
+```

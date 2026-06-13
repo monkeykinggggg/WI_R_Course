@@ -1,0 +1,127 @@
+---
+title: "Raport z wykresami 2"
+author: "wpisz swoje imię"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+
+###### NIE MODYFIKUJ
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+#### POPRA SCIEZKE DO PLIKU JESLI TRZEBA
+cces <- drop_na(read_csv("cces_sample.csv"))
+```
+
+Twoim celem jest odtworzenie tych wykresów, stworzonych przy użyciu danych Cooperative Congressional Election Study.
+
+## Wykres 1
+
+**Wskazówki:**
+
+* Dla osi x użyj zmiennej "ideo5".
+* Upewnij się, że przekodujesz dane dla zmiennej "ideo5", aby wygenerować poprawne nazwy dla osi x. Będziesz musiał zajrzeć do książki kodowej.
+* Użyj estetyki `fill`, aby R wypełnił słupki. Nie musisz ustawiać kolorów ręcznie.
+* Użyj `guides()` do usunięcia legendy.
+* Upewnij się, że etykiety osi i tytuł wykresu są poprawne.
+
+
+
+```{r wykres1,warning = FALSE,echo=TRUE}
+####KOD
+# Filtrujemy wartości 'Nie wiem' (6) i braki danych, a następnie przypisujemy etykiety
+cces_plot1 <- cces %>%
+  filter(ideo5 %in% 1:5) %>%
+  mutate(ideo5 = factor(ideo5, 
+                        levels = 1:5, 
+                        labels = c("Bardzo liberalny", "Liberalny", "Umiarkowany", 
+                                   "Konserwatywny", "Bardzo konserwatywny")))
+
+# Tworzymy wykres słupkowy. 
+# guides(fill = "none") usuwa legendę, bo kolory i tak odpowiadają osi x.
+ggplot(cces_plot1, aes(x = ideo5, fill = ideo5)) +
+  geom_bar() +
+  guides(fill = "none") +
+  labs(
+    x = "Ideologia",
+    y = "Liczba respondentów",
+    title = "Rozkład identyfikacji ideologicznej"
+  )
+```
+
+## Wykres 2
+
+**Wskazówki:**
+
+* Dla osi x użyj zmiennej "pew_religimp".
+* Upewnij się, że przekodujesz dane dla zmiennej "pew_religimp", aby wygenerować poprawne etykiety dla osi x. Będziesz musiał zajrzeć do książki kodowej.
+* Zmień nazwę kolumny dla Ideologii, aby pierwsza litera była wielka (aby legenda wyświetlała się poprawnie).
+* Użyj estetyki `fill`, aby R wypełnił słupki. Nie musisz ustawiać kolorów ręcznie.
+* Upewnij się, że etykiety osi i tytuł wykresu są poprawne.
+
+
+```{r wykres2,echo=TRUE}
+####KOD
+# Przekodowujemy ważność religii oraz ideologię, od razu zmieniając jej nazwę na "Ideologia"
+cces_plot2 <- cces %>%
+  filter(pew_religimp %in% 1:4, ideo5 %in% 1:5) %>%
+  mutate(
+    pew_religimp = factor(pew_religimp, 
+                          levels = 1:4, 
+                          labels = c("Bardzo ważna", "Trochę ważna", 
+                                     "Niezbyt ważna", "Wcale nieważna")),
+    Ideologia = factor(ideo5, 
+                       levels = 1:5, 
+                       labels = c("Bardzo liberalny", "Liberalny", "Umiarkowany", 
+                                  "Konserwatywny", "Bardzo konserwatywny"))
+  )
+
+# Tworzymy wykres. 
+# position = "dodge" ustawia słupki obok siebie, a nie jedne na drugich, 
+# co jest standardem dla takich zestawień (choć zwykłe geom_bar() też zadziała).
+ggplot(cces_plot2, aes(x = pew_religimp, fill = Ideologia)) +
+  geom_bar(position = "dodge") +
+  labs(
+    x = "Ważność religii w życiu",
+    y = "Liczba respondentów",
+    title = "Ideologia a stosunek do religii"
+  )
+```
+
+## Wykres 3
+
+**Instrukcje:**
+
+* W tej wizualizacji tworzysz własne dane do ćwiczeń.
+* Utwórz tibble/ramkę danych z trzema kolumnami: Semestr, Student i Ocena.
+* Powinno być sześć semestrów i trzech studentów (Amanda, Betty i Carol).
+* Utwórz oceny dla studentów, używając polecenia `runif()`, z wartościami od 80 do 100. 
+
+**Wskazówka:** Będziesz potrzebować łącznie 18 ocen.
+* Wykres powinien wyglądać mniej więcej tak (Twoje wartości będą się nieznacznie różnić):
+
+
+
+```{r wykres3,echo=TRUE}
+####KOD
+# Ustawiamy ziarno (seed), aby losowe oceny były takie same przy każdym uruchomieniu kodu
+set.seed(123) 
+
+# Tworzymy ramkę danych
+dane_oceny <- tibble(
+  Semestr = rep(1:6, times = 3),
+  Student = rep(c("Amanda", "Betty", "Carol"), each = 6),
+  Ocena = runif(18, min = 80, max = 100)
+)
+
+# Tworzymy wykres liniowy
+ggplot(dane_oceny, aes(x = Semestr, y = Ocena, color = Student)) +
+  geom_line(size = 1) +
+  geom_point(size = 3) +
+  labs(
+    x = "Semestr",
+    y = "Ocena (80-100)",
+    title = "Wyniki studentek na przestrzeni 6 semestrów",
+    color = "Studentka"
+  )
+```

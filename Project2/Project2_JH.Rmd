@@ -1,0 +1,199 @@
+---
+title: "geom_hurricane_JH"
+author: "Joanna Hełdak"
+date: "2026-05-29"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r cars}
+ext_tracks_widths <- c(7, 10, 2, 2, 3, 5, 5, 6, 4, 5, 4, 4, 5, 3, 4, 3, 3, 3,
+                       4, 3, 3, 3, 4, 3, 3, 3, 2, 6, 1)
+
+ext_tracks_colnames <- c("storm_id", "storm_name", "month", "day", "hour", "year", "latitude", 
+                         "longitude", "max_wind", "min_pressure", "rad_max_wind", "eye_diameter",
+                         "pressure_1", "pressure_2", 
+                         paste("radius_34", c("ne", "se", "sw", "nw"), sep = "_"),
+                         paste("radius_50", c("ne", "se", "sw", "nw"), sep = "_"),
+                         paste("radius_64", c("ne", "se", "sw", "nw"), sep = "_"),
+                         "storm_type", "latitude", "hemisphere")
+
+hurricane_data <- read.fwf("ebtrk_atlc_1988_2015.txt", 
+                           widths = ext_tracks_widths, 
+                           col.names = ext_tracks_colnames)
+str(hurricane_data)
+```
+
+
+```{r , echo=FALSE}
+library(tidyverse)
+library(lubridate)
+mutated_hurricane_data = hurricane_data %>% dplyr::mutate(
+  storm_id = paste(trimws(storm_name), year, sep="-"),
+  longitude = -longitude,
+  date = make_datetime(year, month, day, hour)
+)
+head(mutated_hurricane_data)
+```
+Definicja danych, które będą testowane lub wykorzystywane do wizualizacji:
+```{r , echo=FALSE}
+hurricane_name = "KATRINA-2005"
+hurricane_obs_date = "2005-08-29 12:00:00"
+```
+Tworzymy wymaganą strukturę tabeli w zadaniu i sprawdzamy, które daty mają odpowiednią ilość danych:
+```{r , echo=FALSE}
+prepare_data = function(hurricane_name){ mutated_hurricane_data %>% dplyr::filter(
+  storm_id == hurricane_name) %>% dplyr::select(
+    storm_id, date, latitude, longitude, starts_with("radius_")) %>% tidyr::pivot_longer(
+    cols = starts_with("radius_"),
+    names_to = c("wind_speed", "direction"),
+    names_pattern = "radius_(\\d+)_([a-z]+)",
+    values_to = "radius"
+  ) %>% filter(radius!=0) %>% tidyr::pivot_wider(
+    names_from = direction, 
+    values_from = radius,
+    values_fill = 0) %>% dplyr::select(storm_id, date, latitude, longitude, wind_speed, ne, nw, se, sw)
+}
+katarina_data = prepare_data(hurricane_name)
+katarina_data
+```
+Wybieramy konkretną obserwację:
+```{r , echo=FALSE}
+library(geosphere)
+library(ggplot2)
+observation = katarina_data %>% dplyr::filter(date == ymd_hms(hurricane_obs_date))
+observation
+```
+Tworzenie funkcji geom:
+```{r , echo=FALSE}
+StatHurricane <- ggplot2::ggproto("StatHurricane", ggplot2::Stat,
+  required_aes = c("x", "y", "r_ne", "r_se", "r_nw", "r_sw"),
+  
+  compute_group = function(data, scales, scale_radii = 1) {
+      
+    sea_mile_to_meters <- 1852
+    polygons <- list()
+      
+    for (i in seq_len(nrow(data))) {
+      row <- data[i, ]
+      
+      center <- c(row$x, row$y)
+        
+      make_arc <- function(radius, start_angle, end_angle) {
+        if (radius == 0) {
+          return(data.frame(x = center[1], y = center[2]))
+        }
+        angles <- seq(start_angle, end_angle)
+        distance_from_center <- radius * sea_mile_to_meters * scale_radii
+          
+        pts <- geosphere::destPoint(p = center, b = angles, d = distance_from_center)
+        data.frame(x = pts[, "lon"], y = pts[, "lat"])
+      }
+        
+      poly_data <- rbind(make_arc(row$r_ne, 0, 90),
+                         make_arc(row$r_se, 90, 180),
+                         make_arc(row$r_sw, 180, 270),
+                         make_arc(row$r_nw, 270, 360)
+      )
+      
+      poly_data$group <- row$group
+      poly_data$PANEL <- row$PANEL
+        
+      for (col in c("fill", "colour", "alpha", "linewidth")) {
+        if (col %in% colnames(row)) {
+          poly_data[[col]] <- row[[col]]
+        }
+      }
+      
+      polygons[[i]] <- poly_data
+    }
+    do.call(rbind, polygons)
+  }
+)
+
+geom_hurricane <- function(mapping=NULL, data=NULL, scale_radii = 1, ...) {
+  ggplot2::layer(
+    geom = ggplot2::GeomPolygon, 
+    stat = StatHurricane,        
+    data = data, 
+    mapping = mapping,
+    position = "identity", 
+    show.legend = NA, 
+    inherit.aes = TRUE,
+    params = list(scale_radii = scale_radii, ...)
+  )
+}
+```
+Test:
+```{r , echo=FALSE}
+ggplot(data = observation) +
+  geom_hurricane(aes(x = longitude, y = latitude,
+                     r_ne = ne, r_se = se, r_nw = nw, r_sw = sw,
+                     fill = wind_speed, color = wind_speed)) +
+  scale_color_manual(name = "Wind speed (kts)",
+                     values = c("red", "orange", "yellow")) +
+  scale_fill_manual(name = "Wind speed (kts)",
+                    values = c("red", "orange", "yellow"))
+```
+```{r , echo=FALSE}
+library(ggmap)
+register_stadiamaps("e7945f50-9421-4239-a913-bb8cd47f128b", write = TRUE)
+```
+Wykorzystanie StadiaMaps to wyrysowania huraganu Katarina. Test1:
+```{r , echo=FALSE}
+my_get_map <- function(map_box){
+  get_stadiamap(
+  bbox = map_box,
+  zoom = 6, 
+  maptype = "stamen_toner"
+  )
+  }
+
+ggmap(my_get_map(c(left = -100, bottom = 25, right = -85, top = 35)), extent = "device") +
+  geom_hurricane(data = observation,
+                 aes(x = longitude, y = latitude, 
+                     r_ne = ne, r_se = se, r_nw = nw, r_sw = sw,
+                     fill = wind_speed, color = wind_speed),
+                 alpha = 0.6) + 
+  scale_color_manual(name = "Wind speed (kts)",
+                     values = c("red", "orange", "yellow")) + 
+  scale_fill_manual(name = "Wind speed (kts)",
+                    values = c("red", "orange", "yellow"))
+```
+Test2 dla scale_radii = 0.5:
+```{r , echo=FALSE}
+ggmap(my_get_map(c(left = -100, bottom = 25, right = -85, top = 35)), extent = "device") +
+  geom_hurricane(data = observation,
+                 aes(x = longitude, y = latitude, 
+                     r_ne = ne, r_se = se, r_nw = nw, r_sw = sw,
+                     fill = wind_speed, color = wind_speed),
+                 alpha = 0.6, scale_radii = 0.5) + 
+  scale_color_manual(name = "Wind speed (kts)",
+                     values = c("red", "orange", "yellow")) + 
+  scale_fill_manual(name = "Wind speed (kts)",
+                    values = c("red", "orange", "yellow"))
+```
+Wynik dla Huraganu Ike:
+```{r , echo=FALSE}
+hurricane_name = "IKE-2008"
+hurricane_obs_date = "2008-09-08 00:00:00"
+
+ike_data = prepare_data(hurricane_name)
+ike_observation = ike_data %>% dplyr::filter(date == ymd_hms(hurricane_obs_date))
+center_x = ike_observation$longitude[1]
+cetner_y = ike_observation$latitude[1]
+map_box_for_ike = c(left = center_x - 6, bottom = cetner_y - 4, right = center_x + 6, top = cetner_y + 4)
+ggmap(my_get_map(map_box_for_ike), extent = "device") +
+  geom_hurricane(data = ike_observation,
+                 aes(x = longitude, y = latitude, 
+                     r_ne = ne, r_se = se, r_nw = nw, r_sw = sw,
+                     fill = wind_speed, color = wind_speed),
+                 alpha = 0.6,) + 
+  scale_color_manual(name = "Wind speed (kts)",
+                     values = c("red", "orange", "yellow")) + 
+  scale_fill_manual(name = "Wind speed (kts)",
+                    values = c("red", "orange", "yellow"))
+```

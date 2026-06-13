@@ -1,0 +1,133 @@
+---
+title: "Raport z wykresami 3"
+author: "Joanna"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+######NIE MODYFIKUJ
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+
+```
+
+
+Postępując zgodnie z instrukcjami na stronie zadania, utworzysz cztery oryginalne wizualizacje.
+
+## Wizualizacja 1
+
+
+To jest po prostu wykres punktów **(x, y)**, które są generowane przez rozkład normalny. Użyłem tutaj **theme_classic** oraz `rnorm` do wygenerowania punktów z rozkładu normalnego.
+
+**Umieść tutaj swój wykres:**
+
+
+```{r wykres1,echo=TRUE}
+
+####NAPISZ KOD TUTAJ
+
+set.seed(123)
+
+# Generujemy 100 punktów dla osi X i Y używając domyślnego rozkładu normalnego
+dane_wykres1 <- tibble(
+  x = rnorm(100),
+  y = rnorm(100)
+)
+
+ggplot(dane_wykres1, aes(x = x, y = y)) +
+  geom_point(color = "darkblue", alpha = 0.7) +
+  theme_classic() +
+  labs(
+    title = "Wykres punktowy (rozkład normalny)",
+    x = "Zmienna X",
+    y = "Zmienna Y"
+  )
+```
+
+## Wizualizacja 2
+
+
+Ten wykres porównuje 100 liczb z dwóch generatorów liczb losowych, **runif** i **rnorm**. Oba zostały wykonane z domyślnymi argumentami.
+
+**Umieść tutaj swój wykres:**
+
+```{r wykres2,echo=TRUE}
+
+####NAPISZ KOD TUTAJ
+set.seed(456)
+
+# Generujemy 100 liczb: runif domyślnie od 0 do 1, a rnorm domyślnie wokół zera
+dane_wykres2 <- tibble(
+  Rozklad_Jednostajny = runif(100),
+  Rozklad_Normalny = rnorm(100)
+)
+
+ggplot(dane_wykres2, aes(x = Rozklad_Jednostajny, y = Rozklad_Normalny)) +
+  geom_point(color = "darkgreen") +
+  theme_minimal() +
+  labs(
+    title = "Porównanie runif (X) z rnorm (Y)",
+    x = "Wartości runif()",
+    y = "Wartości rnorm()"
+  )
+
+```
+
+## Wizualizacja 3
+
+Ten wykres pokazuje 200 losowych liczb wygenerowanych przez **rnorm** z domyślnymi ustawieniami, a ich zmiany są widoczne na **osi y**.
+
+**Umieść tutaj swój wykres:**
+
+```{r wykres3,echo=TRUE}
+
+####NAPISZ KOD TUTAJ
+set.seed(789)
+
+# Oś X to indeksy (1 do 200), oś Y to losowe wartości normalne
+dane_wykres3 <- tibble(
+  Indeks = 1:200,
+  Wartosc = rnorm(200)
+)
+
+ggplot(dane_wykres3, aes(x = Indeks, y = Wartosc)) +
+  geom_line(color = "purple") +
+  theme_light() +
+  labs(
+    title = "Zmiany 200 losowych wartości (rnorm)",
+    x = "Kolejny numer losowania",
+    y = "Wygenerowana wartość"
+  )
+
+```
+
+## Wizualizacja 4
+
+Ten kod również dotyczy losowych wartości. Tworzę losowe wartości x i dla każdej z nich losowy typ grupy. Przedstawiam to jako wykres słupkowy. Na końcu dodałem motyw New York Times **theme_wsj()**.
+
+**Umieść tutaj swój wykres:**
+
+```{r wykres4,echo=TRUE}
+#install.packages("ggthemes")
+library(ggthemes)
+####NAPISZ KOD TUTAJ
+# Jeśli ggthemes nie chce się załadować przy Knitowaniu, 
+# upewnij się, że masz je pobrane w konsoli (install.packages("ggthemes"))
+library(ggthemes)
+set.seed(101)
+
+# Generujemy 100 losowych przydziałów do 4 typów grup
+dane_wykres4 <- tibble(
+  Grupa = sample(c("Grupa A", "Grupa B", "Grupa C", "Grupa D"), size = 100, replace = TRUE)
+)
+
+ggplot(dane_wykres4, aes(x = Grupa, fill = Grupa)) +
+  geom_bar() +
+  theme_wsj() + 
+  theme(legend.position = "none") + # Usuwamy legendę, żeby wykres był czytelniejszy
+  labs(
+    title = "Losowe grupy",
+    x = "Typ grupy",
+    y = "Liczność"
+  )
+```

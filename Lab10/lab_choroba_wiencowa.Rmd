@@ -1,0 +1,1292 @@
+---
+title: "Analiza danych klinicznych — choroba wieńcowa"
+author: "Materiały do przedmiotu **Język R**"
+date: "`r format(Sys.Date(), '%d %B %Y')`"
+output:
+  html_document:
+    toc: true
+    toc_float:
+      collapsed: false
+      smooth_scroll: true
+    toc_depth: 3
+    number_sections: true
+    code_folding: show
+    theme: flatly
+    highlight: tango
+    df_print: paged
+    fig_width: 7
+    fig_height: 4.5
+  word_document:
+    toc: true
+    toc_depth: '3'
+subtitle: Kompletna ścieżka analizy statystycznej w R
+editor_options:
+  chunk_output_type: console
+  markdown:
+    wrap: 72
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(
+  echo      = TRUE,
+  warning   = FALSE,
+  message   = FALSE,
+  fig.align = "center",
+  dpi       = 110
+)
+options(scipen = 999, digits = 4)
+```
+
+# Wprowadzenie
+
+## O czym jest ten dokument
+
+Ten dokument prowadzi przez **kompletną ścieżkę analizy danych
+klinicznych** - od wczytania surowego pliku Excel, przez ocenę jakości
+danych i czyszczenie, po testowanie hipotezy, obliczenie wielkości
+efektu i analizę mocy testu. Dane dotyczą pacjentów ocenianych pod kątem
+**choroby wieńcowej** (ang. *coronary heart disease*).
+
+Dokument łączy trzy warstwy:
+
+- **warstwa analityczna** - każdy krok jest wykonany i zinterpretowany w
+  kontekście problemu badawczego,
+- **warstwa programistyczna** - kod w R ilustruje dobre praktyki:
+  czytelne nazewnictwo, funkcje wielokrotnego użytku, pipeline'y z
+  `dplyr`,
+- **warstwa dydaktyczna** - bloki oznaczone **📖 Przypomnienie
+  teoretyczne** wyjaśniają statystyczne „dlaczego" za każdą decyzją.
+
+## Czego dotyczy analiza
+
+Pytanie badawcze brzmi: **czy pacjenci z rozpoznaną chorobą wieńcową
+różnią się przeciętnym poziomem cholesterolu całkowitego od pacjentów
+bez tej choroby?**
+
+Aby na nie odpowiedzieć, musimy najpierw upewnić się, że dane są czyste,
+braki obsłużone, a rozkład zmiennej pozwala na zastosowanie wybranego
+testu. Ponad połowa pracy analityka to przygotowanie danych - test
+statystyczny jest tylko zwieńczeniem dobrze wykonanej roboty.
+
+## Ścieżka analizy - mapa dokumentu
+
+1.  **Skale pomiarowe** → decyzja o typach zmiennych i narzędziach
+2.  **Diagnostyka jakości** → decyzja, co usuwać, a co imputować
+3.  **Rozkłady empiryczne** → wiedza o kształcie danych
+4.  **Dopasowanie rozkładu teoretycznego** → uzasadnienie doboru testów
+5.  **Obsługa zmiennej zależnej** → usunięcie braków (nigdy imputacja)
+6.  **Imputacja zmiennych objaśniających** → mediana vs kNN
+7.  **Winsoryzacja** *(opcjonalna)* → neutralizacja wartości odstających
+8.  **Test istotności** → sprawdzenie założeń + właściwy test
+9.  **Wielkość efektu** → odpowiedź na pytanie „jak bardzo"
+10. **Analiza mocy testu** → czy próba była wystarczająca
+
+## Konwencje użyte w dokumencie
+
+- **📖 Przypomnienie teoretyczne** - zwięzłe wprowadzenie statystyczne
+  przed krokiem analitycznym.
+- **⚠️ Pułapka** - typowy błąd, którego warto unikać.
+- Sekcje oznaczone **(\*)** są opcjonalne - dotyczą technik
+  zaawansowanych, które nie są wymagane do zrozumienia głównej ścieżki.
+
+------------------------------------------------------------------------
+
+# Przygotowanie środowiska
+
+## Wymagane pakiety
+
+```{r install-packages, eval = FALSE}
+# Uruchom tylko przy pierwszym użyciu
+install.packages(c(
+  "tidyverse",      # manipulacja i wizualizacja danych
+  "readxl",         # wczytywanie plików Excel
+  "janitor",        # porządkowanie nazw kolumn
+  "skimr",          # szybki przegląd statystyczny
+  "naniar",         # analiza i wizualizacja braków danych
+  "VIM",            # imputacja metodą kNN
+  "fitdistrplus",   # dopasowanie rozkładów teoretycznych
+  "car",            # test Levene'a
+  "effectsize",     # standaryzowane miary efektu
+  "pwr",            # analiza mocy testu
+  "patchwork",      # łączenie wykresów ggplot obok siebie
+  "knitr"           # ładne tabele w raportach
+))
+```
+
+## Wczytanie bibliotek
+
+Dobra praktyka: ładuj wszystkie pakiety na początku dokumentu, z krótkim
+komentarzem do czego służą. Czytelnik widzi od razu, czego potrzebuje.
+
+```{r load-libraries}
+library(tidyverse)    # dplyr + ggplot2 + tidyr + purrr
+library(readxl)       # read_excel()
+library(janitor)      # clean_names(), tabyl()
+library(skimr)        # skim()
+library(naniar)       # gg_miss_var(), vis_miss()
+library(VIM)          # kNN()
+library(fitdistrplus) # fitdist(), descdist()
+library(car)          # leveneTest()
+library(effectsize)   # cohens_d()
+library(pwr)          # pwr.t.test()
+library(patchwork)    # operator + do łączenia ggplotów
+library(knitr)        # kable()
+```
+
+> **⚠️ Pułapka:** Pakiet `VIM` maskuje funkcję `sample()` z base R.
+> Jeśli po załadowaniu VIM pojawi się nieoczekiwany błąd w losowaniu,
+> wywołaj jawnie `base::sample()`.
+
+------------------------------------------------------------------------
+
+# Wczytanie i pierwszy przegląd danych
+
+## Import z pliku Excel
+
+Zakładamy, że plik **`Zawaly.xlsx`** leży w tym samym folderze co
+notebook. Funkcja `read_excel()` z pakietu **readxl** zwraca *tibble* —
+nowoczesną ramkę danych.
+
+```{r load-data}
+df_raw <- read_excel("Zawaly.xlsx")
+```
+
+## Porządkowanie nazw kolumn
+
+Nazwy w pliku źródłowym zawierają spacje i polskie znaki, co w R zmusza
+do używania apostrofów. Przekształcamy je na jednolity **snake_case** -
+to dobra praktyka, która chroni przed błędami w dalszym kodzie.
+
+```{r clean-names}
+df <- df_raw %>%
+  clean_names() %>%
+  mutate(case_id = row_number(), .before = 1)
+
+names(df)
+```
+
+Po wywołaniu `clean_names()` kolumny mają postać
+`cholesterol_calkowity`, `cisnienie_skurczowe`, `choroba_wiencowa`. Kod
+dzięki temu staje się czytelny i wolny od znaków specjalnych.
+
+## Szybki przegląd
+
+Zanim cokolwiek zmienimy, odpowiadamy na cztery pytania: ile mamy
+**wierszy**, ile **kolumn**, jakie są **typy** i jak wyglądają
+**przykładowe wartości**.
+
+```{r first-glance}
+dim(df)
+```
+
+```{r}
+glimpse(df)
+```
+
+```{r}
+head(df, 5)
+```
+
+Funkcja `skim()` z pakietu **skimr** daje rozbudowany, kompaktowy raport
+— łączy statystyki opisowe, braki i histogramiki w jednej tabeli.
+
+```{r skim}
+skim(df)
+```
+
+------------------------------------------------------------------------
+
+# Skale pomiarowe - fundament dalszej analizy
+
+> **📖 Przypomnienie teoretyczne - skale pomiarowe Stevensa**
+>
+> | Skala        | Pytanie                      | Przykład                       |
+> |------------------|--------------------------|----------------------------|
+> | Nominalna    | czy dwa obiekty się różnią   | płeć, kolor oczu               |
+> | Porządkowa   | który obiekt jest „lepszy"   | czas trwania choroby (3 progi) |
+> | Przedziałowa | o ile obiekt jest większy    | temperatura w °C               |
+> | Ilorazowa    | ile razy obiekt jest większy | wiek, BMI, cholesterol         |
+>
+> Skale przedziałową i ilorazową łączymy jako **zmienne ilościowe** -
+> dla obu sensowne są średnia, odchylenie standardowe, histogram. Od
+> skali zależy **wszystko dalej**: statystyki opisowe, wykresy, metoda
+> imputacji, wybór testu.
+
+## Klasyfikacja zmiennych w naszym zbiorze
+
+Na podstawie `glimpse(df)` i wiedzy dziedzinowej klasyfikujemy zmienne
+następująco:
+
+| Zmienna | Skala | Uzasadnienie |
+|------------------------|------------------------|------------------------|
+| `wiek`, `bmi`, `cholesterol_calkowity`, `hdl`, `ldl`, `tg`, `fg`, `wbc`, `cisnienie_skurczowe`, `cisnienie_rozkurczowe` | **Ilościowa** | ciągłe pomiary, sensowna jest średnia i odchylenie |
+| `plec`, `choroba_wiencowa`, `rodzaj_zawalu`, `palenie` | **Nominalna** | kategorie bez naturalnego porządku |
+| `czas_choroby_wiencowej` | **Porządkowa** | kategorie z naturalnym porządkiem (poniżej 2 m-cy \< od 2 do 12 m-cy \< powyżej 12 m-cy) |
+
+Ta klasyfikacja przesądza o tym, jakich narzędzi użyjemy do każdej
+zmiennej w dalszej analizie.
+
+## Ustalenie poprawnych typów w R
+
+R domyślnie wczytuje zmienne tekstowe jako `character`. Dla analizy
+jakościowej wygodniej jest używać **factorów** - R wie wtedy, że to
+kategorie, i pilnuje ich poziomów przy grupowaniu, tabelach i testach.
+
+```{r coerce-types}
+df <- df %>%
+  mutate(
+    plec             = factor(plec),
+    choroba_wiencowa = factor(choroba_wiencowa, levels = c("nie", "tak")),
+    rodzaj_zawalu    = factor(rodzaj_zawalu),
+    palenie          = factor(palenie, levels = c("nie pali", "pali")),
+    czas_choroby_wiencowej = factor(
+      czas_choroby_wiencowej,
+      levels  = c("poniżej 2 m-cy", "od 2 do 12 m-cy", "powyżej 12 m-cy"),
+      ordered = TRUE
+    )
+  )
+```
+
+Zwróć uwagę na jawne ustawienie `levels` - bez tego R posortuje
+kategorie alfabetycznie, co jest mylące (np. „od 2 do 12" wylądowałoby
+przed „poniżej 2").
+
+## Grupy zmiennych według roli
+
+Definiujemy wektory z nazwami zmiennych o odpowiednich skalach. Dzięki
+temu kolejne kroki (pętle po zmiennych, automatyczne raporty) będą
+zwięzłe i łatwe do modyfikacji. **To jedna z najważniejszych praktyk
+czytelnego kodu analitycznego** - zmień definicję w jednym miejscu, a
+cały pipeline się dostosuje.
+
+```{r variable-groups}
+id_variable          <- "case_id"
+
+quantitative_vars    <- c("wiek", "bmi", "cholesterol_calkowity",
+                          "hdl", "ldl", "tg", "fg", "wbc",
+                          "cisnienie_skurczowe", "cisnienie_rozkurczowe")
+
+nominal_vars         <- c("plec", "choroba_wiencowa",
+                          "rodzaj_zawalu", "palenie")
+
+ordinal_vars         <- c("czas_choroby_wiencowej")
+
+categorical_vars     <- c(nominal_vars, ordinal_vars)
+
+outcome_variable     <- "choroba_wiencowa"   # zmienna zależna (Y)
+```
+
+------------------------------------------------------------------------
+
+# Diagnostyka jakości danych
+
+Zanim zaczniemy liczyć statystyki i rysować wykresy, musimy wiedzieć
+**na ilu obserwacjach możemy dokonywać obliczeń** i **gdzie są brakujące
+dane**. Diagnostyka jakości prowadzona jest w dwóch przekrojach:
+względem kolumn (które zmienne mają braki) i względem wierszy (którzy
+pacjenci mają luki).
+
+## Braki w poszczególnych zmiennych
+
+Przygotowujemy funkcję, która pozwoli uruchomić ten sam raport w różnych
+miejscach analizy (np. po imputacji, żeby sprawdzić efekty). Funkcja
+wielokrotnego użytku jest lepsza od kodu jednorazowego.
+
+```{r variable-quality-function}
+make_variable_quality_summary <- function(data) {
+  tibble(
+    variable    = names(data),
+    class       = map_chr(data, ~ paste(class(.x), collapse = ", ")),
+    n_missing   = map_int(data, ~ sum(is.na(.x))),
+    pct_missing = map_dbl(data, ~ mean(is.na(.x)) * 100),
+    n_unique    = map_int(data, ~ n_distinct(.x, na.rm = TRUE))
+  ) %>%
+    mutate(pct_missing = round(pct_missing, 2)) %>%
+    arrange(desc(pct_missing))
+}
+
+variable_summary <- make_variable_quality_summary(df)
+variable_summary
+```
+
+**Co z tego wynika?** Największe ubytki mamy w `cisnienie_skurczowe` i
+`cisnienie_rozkurczowe` (ok. 23 %) oraz w `czas_choroby_wiencowej` (ok.
+12 %). Dla ciśnień prosta imputacja medianą mogłaby zafałszować
+rozkład - sięgniemy po **kNN**, która uwzględnia podobieństwo pacjentów.
+Zwróćmy też uwagę na **braki w zmiennej zależnej** `choroba_wiencowa` -
+tych **nie** będziemy imputować (wyjaśnienie w dalszej sekcji).
+
+## Braki w poszczególnych przypadkach
+
+Analiza „od strony wiersza" pokazuje, czy istnieją pacjenci ze znacznym
+odsetkiem braków, których lepiej **usunąć** niż ratować imputacją.
+
+```{r case-missing-function}
+make_case_missing_report <- function(data, id_col = 1, top_n_cases = NULL) {
+  id_name    <- names(data)[id_col]
+  data_no_id <- data[, -id_col, drop = FALSE]
+  
+  report <- tibble(
+    !!id_name   := data[[id_col]],
+    n_missing    = rowSums(is.na(data_no_id)),
+    pct_missing  = round(rowMeans(is.na(data_no_id)) * 100, 2)
+  ) %>%
+    arrange(desc(pct_missing), desc(n_missing))
+  
+  if (!is.null(top_n_cases))
+    report <- report %>% slice_head(n = top_n_cases)
+  
+  report
+}
+
+make_case_missing_report(df, top_n_cases = 15)
+```
+
+## Wizualny wzorzec braków
+
+Pakiet **naniar** rysuje mapę braków - pozwala ocenić, czy braki są
+*losowo* rozrzucone, czy *skoncentrowane* w konkretnych kolumnach bądź
+wierszach.
+
+```{r missing-visuals, fig.height = 6, fig.width = 9}
+gg_miss_var(df, show_pct = TRUE) +
+  labs(title = "Odsetek braków w każdej zmiennej") +
+  theme(axis.text.y = element_text(size = 9))
+
+vis_miss(df, sort_miss = TRUE) +
+  labs(title = "Mapa braków (czarne = NA)") +
+  theme(axis.text.x = element_text(angle = 50, hjust = 1, size = 8))
+```
+
+> **📖 Przypomnienie teoretyczne - mechanizmy braków (Rubin, 1976)**
+>
+> - **MCAR** (*Missing Completely At Random*) - braki losowe, niezależne
+>   od czegokolwiek; można bezpiecznie usuwać lub imputować prostymi
+>   metodami.
+> - **MAR** (*Missing At Random*) - braki zależne od **obserwowanych**
+>   zmiennych (np. starsi pacjenci częściej nie mieli zapisanego
+>   ciśnienia). Tu dobrze sprawdza się kNN.
+> - **MNAR** (*Missing Not At Random*) - braki zależne od **samej**
+>   niezmierzonej wartości. Najtrudniejszy przypadek - żadna standardowa
+>   imputacja nie jest bezpieczna.
+>
+> W realnych danych klinicznych rzadko mamy pewność, który mechanizm
+> działa. Zasada ostrożności: **nigdy nie imputujemy zmiennej
+> zależnej**.
+
+## Usunięcie przypadków z dużym odsetkiem braków
+
+Jeżeli pacjent ma brak w większości pomiarów, jego imputacja byłaby
+konfabulacją - lepiej go wykluczyć. Ustawiamy próg: **powyżej 50 %**
+braków w wierszu → usuwamy.
+
+```{r drop-bad-rows}
+remove_rows_above_missing_threshold <- function(data, threshold_pct = 50,
+                                                id_col = 1) {
+  id_name    <- names(data)[id_col]
+  data_no_id <- data[, -id_col, drop = FALSE]
+  
+  report <- tibble(
+    !!id_name   := data[[id_col]],
+    n_missing    = rowSums(is.na(data_no_id)),
+    pct_missing  = round(rowMeans(is.na(data_no_id)) * 100, 2)
+  )
+  
+  removed <- report %>%
+    filter(pct_missing > threshold_pct) %>%
+    arrange(desc(pct_missing))
+  
+  cleaned <- data %>%
+    anti_join(removed %>% dplyr::select(all_of(id_name)), by = id_name)
+  
+  list(data_clean = cleaned, removed_cases = removed)
+}
+
+row_filter <- remove_rows_above_missing_threshold(df, threshold_pct = 50)
+df <- row_filter$data_clean
+row_filter$removed_cases
+dim(df)
+```
+
+Przy progu 50 % usunęliśmy `r nrow(row_filter$removed_cases)` pacjentów.
+Gdybyśmy obniżyli próg do 25 %, stracilibyśmy więcej obserwacji —
+zyskalibyśmy czystsze dane kosztem mniejszej próby i niższej mocy
+statystycznej. W praktyce to zawsze kompromis: im niższy próg, tym
+czystsze dane, ale mniejsza siła wnioskowania.
+
+------------------------------------------------------------------------
+
+# Analiza rozkładów empirycznych - zmienne ilościowe
+
+> **📖 Przypomnienie teoretyczne — jak opisujemy rozkład liczbowy**
+>
+> 1.  **Tendencja centralna** - gdzie „skupia się" rozkład? Średnia
+>     $\bar{x}$ (wrażliwa na wartości skrajne), mediana (bardziej
+>     odporna), moda, średnia Winsora, średnia przycięta.
+> 2.  **Rozproszenie** -jak bardzo obserwacje się różnią? Odchylenie
+>     standardowe $s$, rozstęp międzykwartylowy IQR (odporny),
+>     współczynnik zmienności $CV = s / \bar{x}$ (ma sens dla danych
+>     nieujemnych).
+> 3.  **Kształt** - skośność $g_1$ (symetria rozkładu) i kurtoza $g_2$
+>     (ciężkość ogonów).
+>
+> **Nieparametryczny współczynnik skośności Pearsona**
+> $\mathrm{PS} = \frac{\bar{x} - \mathrm{Me}}{s}$ pozwala szybko ocenić
+> asymetrię: $|\mathrm{PS}| < 0{,}2$ → rozkład w przybliżeniu
+> symetryczny, $[0{,}2;\, 1]$ → skośność umiarkowana, $> 1$ → silna. W
+> rozkładach asymetrycznych mediana jest preferowaną miarą tendencji
+> centralnej, a testy parametryczne stają się ryzykowne.
+
+## Funkcje pomocnicze
+
+Definiujemy dwie funkcje wielokrotnego użytku: jedną do zestawu trzech
+wykresów diagnostycznych (histogram, box-plot, Q-Q), drugą do tabeli
+statystyk. Dzięki temu przegląd dowolnej zmiennej to jedno wywołanie, a
+nie kilkanaście linii kodu.
+
+```{r plotting-functions}
+plot_quantitative_distribution <- function(data, variable, bins = 30) {
+  
+  plot_data <- data %>%
+    dplyr::select(all_of(variable)) %>%
+    rename(value = all_of(variable)) %>%
+    filter(!is.na(value))
+  
+  histogram <- ggplot(plot_data, aes(x = value)) +
+    geom_histogram(bins = bins, colour = "white", fill = "#4C78A8") +
+    labs(subtitle = "Histogram", x = variable, y = "Liczebność") +
+    theme_minimal(base_size = 10)
+  
+  boxplot_ <- ggplot(plot_data, aes(y = value, x = "")) +
+    geom_boxplot(width = 0.25, outlier.colour = "red", fill = "#A8C5DA") +
+    geom_jitter(width = 0.05, alpha = 0.35, size = 1) +
+    labs(subtitle = "Ramka-wąsy", x = NULL, y = variable) +
+    theme_minimal(base_size = 10)
+  
+  qq_ <- ggplot(plot_data, aes(sample = value)) +
+    stat_qq(alpha = 0.5) +
+    stat_qq_line(colour = "red") +
+    labs(subtitle = "Wykres Q-Q",
+         x = "Kwantyle teoretyczne N(0,1)",
+         y = "Kwantyle próbki") +
+    theme_minimal(base_size = 10)
+  
+  list(histogram = histogram, boxplot = boxplot_, qq = qq_)
+}
+```
+
+```{r summary-function}
+summarise_quantitative <- function(data, vars) {
+  
+  skew <- function(x) {
+    x <- x[!is.na(x)]; n <- length(x)
+    if (n < 3 || sd(x) == 0) return(NA_real_)
+    n / ((n - 1) * (n - 2)) * sum(((x - mean(x)) / sd(x))^3)
+  }
+  
+  map_dfr(vars, function(v) {
+    x <- data[[v]]; x0 <- x[!is.na(x)]
+    tibble(
+      variable   = v,
+      n          = length(x0),
+      n_missing  = sum(is.na(x)),
+      mean       = round(mean(x0), 2),
+      median     = round(median(x0), 2),
+      sd         = round(sd(x0), 2),
+      q1         = round(quantile(x0, 0.25), 2),
+      q3         = round(quantile(x0, 0.75), 2),
+      iqr        = round(IQR(x0), 2),
+      min        = round(min(x0), 2),
+      max        = round(max(x0), 2),
+      cv_pct     = round(sd(x0) / mean(x0) * 100, 2),
+      skewness   = round(skew(x0), 2)
+    )
+  })
+}
+```
+
+## Przegląd wszystkich zmiennych ilościowych
+
+```{r quantitative-summary}
+quantitative_summary <- summarise_quantitative(df, quantitative_vars)
+kable(quantitative_summary, caption = "Statystyki opisowe zmiennych ilościowych")
+```
+
+**Interpretacja kolumny `skewness`:**
+
+- `wiek`, `bmi`, `cholesterol_calkowity`, `ldl` - wartości bliskie 0 →
+  **rozkłady symetryczne**, dobre dla testów parametrycznych.
+- `tg` (triglicerydy), `wbc`, `cisnienie_skurczowe` - skośność wyraźnie
+  \> 1 → **rozkłady prawostronnie skośne**. Mediana jest lepszym opisem
+  typowej wartości niż średnia, a test t-Studenta jest ryzykowny.
+
+### Wykresy dla wszystkich zmiennych
+
+```{r quantitative-plots, fig.height = 3.2, results = "asis"}
+for (v in quantitative_vars) {
+  cat("\n\n#### ", v, "\n\n")
+  p <- plot_quantitative_distribution(df, v)
+  combined <- (p$histogram + p$boxplot + p$qq) +
+    plot_annotation(
+      title = paste("Analiza rozkładu zmiennej:", v),
+      theme = theme(plot.title = element_text(face = "bold", size = 13))
+    )
+  print(combined)
+}
+```
+
+## Studium przypadku: rozkład symetryczny vs asymetryczny
+
+Porównajmy **cholesterol całkowity** (symetryczny) z **triglicerydami**
+(prawostronnie skośny).
+
+```{r symmetric-vs-skewed, fig.height = 5}
+p1 <- plot_quantitative_distribution(df, "cholesterol_calkowity")
+p2 <- plot_quantitative_distribution(df, "tg")
+
+(p1$histogram | p2$histogram) /
+(p1$qq        | p2$qq       )
+```
+
+**Jak czytać wykres Q-Q?** Punkty powinny układać się wzdłuż czerwonej
+linii - każdy punkt mówi: „mój kwantyl empiryczny vs kwantyl teoretyczny
+rozkładu normalnego". Dla cholesterolu punkty leżą blisko prostej -
+rozkład jest bliski normalnemu. Dla triglicerydów punkty wyraźnie
+**odchylają się w górę** w prawym ogonie → skośność dodatnia.
+
+### Transformacja logarytmiczna triglicerydów
+
+Dla zmiennych prawoskośnych z wartościami dodatnimi klasycznym
+narzędziem jest **transformacja logarytmiczna**. Sprawdźmy, czy
+„wyprostuje" rozkład triglicerydów.
+
+```{r log-transform-tg, fig.height = 4}
+log_tg <- log(df$tg[!is.na(df$tg)])
+
+p_log_hist <- ggplot(tibble(x = log_tg), aes(x = x)) +
+  geom_histogram(bins = 30, colour = "white", fill = "#59A14F") +
+  labs(title = "log(TG) — histogram", x = "log(triglicerydy)") +
+  theme_minimal()
+
+p_log_qq <- ggplot(tibble(x = log_tg), aes(sample = x)) +
+  stat_qq(alpha = 0.5) + stat_qq_line(colour = "red") +
+  labs(title = "log(TG) — Q-Q", x = "Kwantyle teoretyczne") +
+  theme_minimal()
+
+p_log_hist + p_log_qq
+```
+
+Transformacja logarytmiczna wyraźnie poprawiła symetrię rozkładu -
+punkty Q-Q leżą teraz znacznie bliżej linii. To potwierdza, że
+triglicerydy mają rozkład bliski **log-normalnemu**, co jest typowe w
+medycynie dla stężeń i koncentracji (mechanizm biologiczny jest
+multiplikatywny, nie addytywny).
+
+```{r log-skewness}
+cat("Skośność TG (oryginalna):", round(e1071::skewness(df$tg, na.rm = TRUE), 2), "\n")
+cat("Skośność log(TG):       ", round(e1071::skewness(log_tg), 2), "\n")
+```
+
+------------------------------------------------------------------------
+
+# Dopasowanie rozkładów teoretycznych
+
+Rozkład empiryczny zawsze zawiera „szum" wynikający ze skończonej próby.
+Dopasowanie **rozkładu teoretycznego** pozwala:
+
+- **zwięźle opisać** dane - dwa parametry zamiast chmury obserwacji,
+- **wnioskować o populacji** - oszacować prawdopodobieństwa,
+- **uzasadnić dobór testu** - większość procedur parametrycznych zakłada
+  określony rozkład.
+
+## Wykres Cullena–Freya - który rozkład jest kandydatem? (\*)
+
+*Ta sekcja jest opcjonalna. Wykres Cullena–Freya jest narzędziem
+zaawansowanym, przydatnym gdy rozważamy wielu kandydatów na rozkład
+teoretyczny. Główna ścieżka analizy nie wymaga jego znajomości.*
+
+Funkcja `descdist()` z pakietu **fitdistrplus** umieszcza próbkę na
+płaszczyźnie **(skośność)² × kurtoza**, na której każdy rozkład
+teoretyczny zajmuje charakterystyczne miejsce.
+
+```{r descdist-cholesterol, fig.height = 4.5}
+chol <- df$cholesterol_calkowity[!is.na(df$cholesterol_calkowity)]
+descdist(chol, boot = 500)
+```
+
+```{r descdist-tg, fig.height = 4.5}
+tg_vals <- df$tg[!is.na(df$tg)]
+descdist(tg_vals, boot = 500)
+```
+
+**Interpretacja:**
+
+- **Cholesterol** - czerwone kółko leży praktycznie na gwiazdce rozkładu
+  normalnego ($g_1^2 \approx 0$, $g_2 \approx 3$). Chmura bootstrapowa
+  jest ciasna → silne wskazanie na **rozkład normalny**.
+- **Triglicerydy** — kółko przesunięte w prawo i w dół, w obszarze
+  rozkładów **gamma** i **log-normalnego**. Chmura jest szersza, co
+  odzwierciedla wpływ wartości skrajnych na estymację momentów wyższych
+  rzędów.
+
+Sam wykres nie rozstrzyga wyboru między gamma a log-normalnym - do tego
+potrzebny jest formalny model i kryterium porównawcze (AIC).
+
+## Dopasowanie rozkładu normalnego do cholesterolu
+
+Funkcja `fitdist()` szacuje parametry metodą **największej
+wiarygodności** (MLE).
+
+```{r fit-normal-cholesterol}
+fit_chol_norm <- fitdist(chol, "norm")
+summary(fit_chol_norm)
+```
+
+```{r fit-normal-plots, fig.height = 5.5}
+plot(fit_chol_norm)
+```
+
+**Cztery panele diagnostyczne** pokazują dopasowanie z różnych
+perspektyw: histogram z gęstością teoretyczną (ogólna zgodność), Q-Q
+(ogony rozkładu), dystrybuanty empiryczna i teoretyczna (środek
+rozkładu), P-P (komplementarny do Q-Q). Dla cholesterolu dopasowanie
+jest bardzo dobre - punkty leżą blisko linii na obu wykresach
+kwantylowych.
+
+## Dopasowanie rozkładu log-normalnego do triglicerydów
+
+```{r fit-lognorm-tg, fig.height = 5.5}
+fit_tg_lognorm <- fitdist(tg_vals, "lnorm")
+summary(fit_tg_lognorm)
+plot(fit_tg_lognorm)
+```
+
+Parametry `meanlog` i `sdlog` opisują rozkład **logarytmu** zmiennej.
+Mediana rozkładu oryginalnego to $\exp(\mu)$, a średnia to
+$\exp(\mu + \sigma^2/2)$ — dla rozkładu log-normalnego **średnia jest
+zawsze większa od mediany**.
+
+## Porównanie modeli dla triglicerydów
+
+Dopasowujemy trzy rozkłady i porównujemy je kryterium AIC.
+
+```{r compare-tg-fits}
+fit_tg_norm    <- fitdist(tg_vals, "norm")
+fit_tg_gamma   <- fitdist(tg_vals, "gamma")
+fit_tg_lognorm <- fitdist(tg_vals, "lnorm")
+
+aic_comparison <- tibble(
+  model    = c("normalny", "gamma", "log-normalny"),
+  AIC      = c(fit_tg_norm$aic, fit_tg_gamma$aic, fit_tg_lognorm$aic),
+  delta_AIC = AIC - min(AIC)
+)
+kable(aic_comparison, caption = "Porównanie modeli dla triglicerydów (AIC)")
+```
+
+> **📖 Przypomnienie teoretyczne - AIC.** Kryterium Informacyjne
+> Akaikego $AIC = 2k - 2\ln(L)$ łączy dopasowanie (loglikelihood) z
+> oszczędnością parametrów. Niższy AIC = lepszy model. Progi
+> interpretacji $\Delta$AIC: poniżej 2 - modele praktycznie równoważne;
+> 4–7 - umiarkowane wskazanie; powyżej 10 - silne wskazanie.
+
+Rozkład log-normalny wygrywa z wyraźną przewagą. Wynik potwierdza
+diagnozę z transformacji logarytmicznej i wykresu Cullena–Freya.
+
+------------------------------------------------------------------------
+
+# Analiza zmiennych jakościowych
+
+Dla zmiennych nominalnych i porządkowych nie ma sensu średnia ani
+histogram — opisujemy je **liczebnościami** i **odsetkami** oraz
+**wykresem słupkowym**.
+
+```{r categorical-functions}
+make_categorical_frequency_table <- function(data, variable, include_na = TRUE) {
+  x <- data[[variable]]
+  counts <- if (include_na) table(x, useNA = "ifany") else table(x, useNA = "no")
+  tibble(category = names(counts), n = as.integer(counts)) %>%
+    mutate(pct = round(n / sum(n) * 100, 2))
+}
+
+plot_categorical_distribution <- function(data, variable, include_na = TRUE) {
+  plot_data <- data %>%
+    dplyr::select(all_of(variable)) %>%
+    rename(value = all_of(variable))
+  if (!is.factor(plot_data$value))
+    plot_data$value <- factor(plot_data$value)
+  if (include_na) {
+    plot_data$value <- addNA(plot_data$value)
+    levels(plot_data$value)[is.na(levels(plot_data$value))] <- "Brak danych"
+  } else {
+    plot_data <- plot_data %>% filter(!is.na(value))
+  }
+  ggplot(plot_data, aes(x = value, fill = value)) +
+    geom_bar(colour = "black", show.legend = FALSE) +
+    scale_fill_brewer(palette = "Blues") +
+    labs(title = paste("Rozkład:", variable), x = variable, y = "Liczebność") +
+    theme_minimal(base_size = 11) +
+    theme(axis.text.x = element_text(angle = 15, hjust = 1))
+}
+```
+
+```{r categorical-overview, fig.height = 3.5, results = "asis"}
+for (v in categorical_vars) {
+  cat("\n\n#### ", v, "\n\n")
+  tab <- make_categorical_frequency_table(df, v, include_na = TRUE)
+  print(kable(tab))
+  print(plot_categorical_distribution(df, v, include_na = TRUE))
+}
+```
+
+> **⚠️ Pułapka — silnie niezbilansowana zmienna zależna**
+>
+> Zmienna `choroba_wiencowa` ma \~85 % „tak" i \~12 % „nie" — próba jest
+> **silnie niezbilansowana**.
+
+------------------------------------------------------------------------
+
+# Braki w zmiennej zależnej - usuwamy, nie imputujemy
+
+> **📖 Dlaczego nie imputujemy Y?**
+>
+> Imputacja zmiennej zależnej byłaby **konfabulacją etykiety**: sami
+> wygenerowalibyśmy odpowiedź, której chcemy dowieść testem. Wynik testu
+> przestałby cokolwiek znaczyć - byłby wypadkową prawdziwych danych i
+> naszych zgadywań. **Zasada: rekordy z brakiem w Y zawsze usuwamy.**
+
+```{r drop-missing-outcome}
+remove_cases_with_missing_in_variables <- function(data, variables, id_col = 1) {
+  id_name <- names(data)[id_col]
+  removed <- data %>%
+    filter(if_any(all_of(variables), is.na)) %>%
+    rowwise() %>%
+    mutate(missing_in_variables = paste(
+      variables[is.na(c_across(all_of(variables)))], collapse = ", ")) %>%
+    ungroup() %>%
+    dplyr::select(all_of(id_name), missing_in_variables)
+  cleaned <- data %>%
+    filter(!if_any(all_of(variables), is.na))
+  list(data_clean = cleaned, removed_cases = removed)
+}
+
+outcome_filter <- remove_cases_with_missing_in_variables(df, outcome_variable)
+outcome_filter$removed_cases
+df <- outcome_filter$data_clean
+dim(df)
+```
+
+------------------------------------------------------------------------
+
+# Imputacja braków w zmiennych objaśniających
+
+## Kiedy mediana, a kiedy kNN?
+
+| Odsetek braków | Zalecana metoda | Uzasadnienie |
+|------------------------|------------------------|------------------------|
+| do \~5 % | mediana / moda | wpływ na rozkład minimalny |
+| 5–15 % | mediana (jeśli MCAR) lub kNN | kNN bezpieczniejsze |
+| powyżej 15 % | **kNN** lub regresja | prosta imputacja zafałszowałaby rozkład |
+| powyżej 40 % | rozważ usunięcie zmiennej | zbyt mało informacji |
+
+```{r post-drop-quality}
+make_variable_quality_summary(df)
+```
+
+## Imputacja medianą - zmienne z niskim odsetkiem braków
+
+Mediana jest **odporna na wartości odstające**, dlatego chętnie sięgamy
+po nią przy prostej imputacji. Ważna właściwość: imputacja medianą **nie
+zmienia mediany** próby (wartość wstawiana jest równa samej mierze
+centralnej). Średnia może się nieznacznie przesunąć.
+
+```{r median-impute}
+median_impute_vars <- c("bmi", "cholesterol_calkowity",
+                        "hdl", "ldl", "tg", "fg", "wbc", "wiek")
+
+impute_median_for_variables <- function(data, variables) {
+  for (v in variables) {
+    med <- median(data[[v]], na.rm = TRUE)
+    data[[v]][is.na(data[[v]])] <- med
+  }
+  data
+}
+
+df <- impute_median_for_variables(df, median_impute_vars)
+```
+
+## Imputacja kNN - ciśnienia
+
+Dla zmiennych z ok. 23 % braków używamy **kNN** - każdemu brakowi
+przypisujemy wartość jako agregat z $k$ pacjentów najbardziej podobnych
+na innych zmiennych.
+
+> **📖 Przypomnienie teoretyczne - kNN w imputacji**
+>
+> 1.  Dla każdego rekordu z brakiem liczymy **odległość** do pozostałych
+>     rekordów (Gowera dla typów mieszanych, euklidesowa dla
+>     numerycznych).
+> 2.  Wybieramy $k$ najbliższych sąsiadów (domyślnie $k = 5$).
+> 3.  Brak zastępujemy **agregatem** z tych $k$ sąsiadów.
+>
+> Zalety: wykorzystuje wielowymiarową informację, zachowuje strukturę
+> korelacji. Wady: wrażliwe na skalę zmiennych i kosztowne dla dużych
+> zbiorów.
+
+```{r knn-impute}
+knn_impute_vars <- c("cisnienie_skurczowe", "cisnienie_rozkurczowe",
+                     "czas_choroby_wiencowej")
+
+knn_predictors <- setdiff(names(df),
+                          c(id_variable, outcome_variable, knn_impute_vars))
+
+df <- VIM::kNN(
+  data     = df,
+  variable = knn_impute_vars,
+  dist_var = knn_predictors,
+  k        = 5,
+  imp_var  = FALSE
+) %>%
+  as_tibble()
+```
+
+## Kontrola po imputacji
+
+```{r post-imputation-check}
+make_variable_quality_summary(df)
+```
+
+Wszędzie `n_missing = 0`. Dane są gotowe do analizy.
+
+------------------------------------------------------------------------
+
+# Wartości odstające i winsoryzacja (\*)
+
+*Ta sekcja jest opcjonalna. Winsoryzacja jest techniką kontrowersyjną w
+analizie klinicznej - ekstremalne wartości kliniczne często niosą ważną
+informację. Pokazujemy ją jako narzędzie, nie jako zalecenie.*
+
+> **📖 Reguła Tukeya**
+>
+> Obserwacja jest **odstająca**, jeżeli leży poza przedziałem
+> $[Q_1 - 1{,}5 \cdot \text{IQR},\; Q_3 + 1{,}5 \cdot \text{IQR}]$.
+> Opcje: usunąć (błąd pomiaru), zostawić (prawdziwa zmienność),
+> **winsoryzować** (zastąpić wartością na granicy). Winsoryzacja jest
+> kompromisem - zachowujemy obserwację, ale ograniczamy wpływ na
+> statystyki.
+
+```{r winsorize-function}
+winsorize_tukey <- function(x, coef = 1.5) {
+  q1  <- quantile(x, 0.25, na.rm = TRUE)
+  q3  <- quantile(x, 0.75, na.rm = TRUE)
+  iqr <- q3 - q1
+  low  <- q1 - coef * iqr
+  high <- q3 + coef * iqr
+  x[x < low]  <- low
+  x[x > high] <- high
+  x
+}
+```
+
+```{r winsorize-apply, fig.height = 4}
+df_pre_wins <- df
+
+for (v in quantitative_vars) {
+  df[[v]] <- winsorize_tukey(df[[v]], coef = 1.5)
+}
+
+p_before <- ggplot(df_pre_wins, aes(y = tg)) +
+  geom_boxplot(fill = "#F28E2B") +
+  labs(title = "TG — przed winsoryzacją") + theme_minimal()
+
+p_after <- ggplot(df, aes(y = tg)) +
+  geom_boxplot(fill = "#59A14F") +
+  labs(title = "TG — po winsoryzacji") + theme_minimal()
+
+p_before + p_after
+```
+
+Sprawdźmy, ile wartości zostało obciętych w triglicerydach:
+
+```{r winsorize-count}
+q1 <- quantile(df_pre_wins$tg, 0.25); q3 <- quantile(df_pre_wins$tg, 0.75)
+iqr <- q3 - q1
+lower <- q1 - 1.5 * iqr; upper <- q3 + 1.5 * iqr
+
+cat("Granice Tukeya:", round(lower, 1), "–", round(upper, 1), "\n")
+cat("Obcięto poniżej:", sum(df_pre_wins$tg < lower), "wartości\n")
+cat("Obcięto powyżej:", sum(df_pre_wins$tg > upper), "wartości\n")
+```
+
+```{r post-wins-summary}
+summarise_quantitative(df, quantitative_vars) %>%
+  kable(caption = "Statystyki po winsoryzacji")
+```
+
+Widoczny jest **spadek odchylenia standardowego** i **zmniejszenie
+skośności** w zmiennych, które miały ostre wartości odstające (zwłaszcza
+`tg`, `wbc`, `fg`).
+
+------------------------------------------------------------------------
+
+# Testowanie hipotezy - cholesterol a choroba wieńcowa
+
+> **📖 Anatomia testu statystycznego**
+>
+> 1.  **Hipotezy**: $H_0$ (brak różnicy) vs $H_1$ (jest różnica).
+> 2.  **Statystyka testowa** - wartość policzona z danych.
+> 3.  **Poziom istotności** $\alpha$ - typowo 0.05.
+> 4.  **p-wartość** - prawdopodobieństwo że dane są kompatybilne z
+>     $H_0$.
+> 5.  **Decyzja**: $p < \alpha$ → odrzucamy $H_0$.
+>
+> **p-wartość nie mówi, jak duża jest różnica** - do tego służy wielkość
+> efektu (następna sekcja).
+
+## Pytanie badawcze i hipotezy
+
+**Pytanie**: Czy pacjenci z rozpoznaną chorobą wieńcową różnią się
+przeciętnym poziomem cholesterolu całkowitego od pacjentów bez tej
+choroby?
+
+- $H_0$: $\mu_{\text{tak}} = \mu_{\text{nie}}$ - wartości oczekiwane są
+  takie same - **w hipotezach odwołujemy się do populacji a nie próby!**
+- $H_1$: $\mu_{\text{tak}} \ne \mu_{\text{nie}}$ - wartości oczekiwane
+  się różnią (test dwustronny) - **w hipotezach odwołujemy się do
+  populacji a nie próby!**
+- $\alpha = 0{,}05$.
+
+## Opis w grupach
+
+```{r analysis-df}
+analysis_df <- df %>%
+  dplyr::select(choroba_wiencowa, cholesterol_calkowity) %>%
+  drop_na()
+
+analysis_df %>%
+  group_by(choroba_wiencowa) %>%
+  summarise(
+    n      = n(),
+    mean   = mean(cholesterol_calkowity),
+    sd     = sd(cholesterol_calkowity),
+    median = median(cholesterol_calkowity),
+    q1     = quantile(cholesterol_calkowity, 0.25),
+    q3     = quantile(cholesterol_calkowity, 0.75),
+    .groups = "drop"
+  ) %>%
+  kable(caption = "Cholesterol całkowity w grupach")
+```
+
+## Inspekcja wizualna
+
+```{r inspect-groups, fig.height = 4}
+p_box <- ggplot(analysis_df,
+                aes(x = choroba_wiencowa, y = cholesterol_calkowity,
+                    fill = choroba_wiencowa)) +
+  geom_boxplot(alpha = 0.7) +
+  geom_jitter(width = 0.1, alpha = 0.35) +
+  scale_fill_brewer(palette = "Set2") +
+  labs(title = "Cholesterol wg grupy", x = "Choroba wieńcowa", y = "mg/dl") +
+  theme_minimal() + theme(legend.position = "none")
+
+p_hist <- ggplot(analysis_df,
+                 aes(x = cholesterol_calkowity, fill = choroba_wiencowa)) +
+  geom_histogram(bins = 20, colour = "white", alpha = 0.7) +
+  facet_wrap(~ choroba_wiencowa, ncol = 1) +
+  scale_fill_brewer(palette = "Set2") +
+  labs(title = "Histogramy w grupach", x = "Cholesterol (mg/dl)", y = "N") +
+  theme_minimal() + theme(legend.position = "none")
+
+p_box + p_hist
+```
+
+## Sprawdzenie założeń
+
+### Normalność w grupach (Shapiro-Wilk)
+
+```{r shapiro}
+by(analysis_df$cholesterol_calkowity,
+   analysis_df$choroba_wiencowa,
+   shapiro.test)
+```
+
+Mała p-wartość (\< 0.05) → odrzucamy hipotezę o normalności. Przy dużych
+próbach (n \> 30) test bywa „nadczuły" na drobne odstępstwa - dlatego
+uzupełniamy go inspekcją Q-Q.
+
+```{r qq-by-group, fig.height = 3.5}
+ggplot(analysis_df,
+       aes(sample = cholesterol_calkowity, colour = choroba_wiencowa)) +
+  stat_qq(alpha = 0.5) + stat_qq_line() +
+  facet_wrap(~ choroba_wiencowa) +
+  scale_colour_brewer(palette = "Set2") +
+  theme_minimal() + theme(legend.position = "none") +
+  labs(title = "Q-Q cholesterolu wg grup")
+```
+
+### Jednorodność wariancji (test Levene'a)
+
+```{r levene}
+leveneTest(cholesterol_calkowity ~ choroba_wiencowa, data = analysis_df)
+```
+
+p \> 0.05 → nie ma podstaw do odrzucenia $H_0$ o równości wariancji →
+można użyć **klasycznego** testu t-Studenta (`var.equal = TRUE`). W
+przeciwnym razie użylibyśmy wariantu Welcha.
+
+## Drzewo decyzyjne — który test?
+
+```         
+Porównanie dwóch średnich (próby niezależne)
+│
+├─► Normalność w obu grupach?
+│    ├─► TAK → Wariancje równe?
+│    │         ├─► TAK → t-Studenta (klasyczny)
+│    │         └─► NIE → t-Welch
+│    └─► NIE → test Manna-Whitneya (nieparametryczny)
+```
+
+## Wykonanie testu t-Studenta
+
+Na bazie Shapiro-Wilka i Levene'a decydujemy się na **klasyczny test
+t-Studenta**.
+
+```{r t-test}
+t_result <- t.test(cholesterol_calkowity ~ choroba_wiencowa,
+                   data      = analysis_df,
+                   var.equal = TRUE)
+t_result
+```
+
+## Porównanie z testem nieparametrycznym
+
+Dla pełnego obrazu uruchamiamy też test **Manna-Whitneya** - porównuje
+rangi zamiast średnich, nie wymaga normalności.
+
+```{r mann-whitney}
+wilcox_result <- wilcox.test(cholesterol_calkowity ~ choroba_wiencowa,
+                              data = analysis_df)
+wilcox_result
+```
+
+```{r compare-tests}
+tibble(
+  test      = c("t-Studenta", "Mann-Whitney"),
+  p_value   = c(t_result$p.value, wilcox_result$p.value),
+  wniosek   = ifelse(p_value < 0.05, "odrzucamy H₀", "brak podstaw do odrzucenia H₀")
+) %>%
+  kable(caption = "Porównanie wyników obu testów")
+```
+
+Zgodność wniosków obu testów **wzmacnia wiarygodność** wyniku - różnica
+jest realna, niezależnie od metody.
+
+Na podstawie wyników testu t-Studenta dla prób niezależnych, przy
+przyjętym poziomie istotności **α = 0,05**, uzyskano wynik **p =
+0,00006**. (częstą praktyką jest raportowanie na 4 miejscach po
+przecinku **p\<0,0001**). Ponieważ wartość p jest mniejsza od przyjętego
+poziomu istotności, **odrzucamy hipotezę zerową** mówiącą o tym, że
+przeciętny poziom cholesterolu całkowitego jest taki sam u osób bez
+choroby wieńcowej i u osób z chorobą wieńcową.
+
+Przyjmujemy hipotezę alternatywną, zgodnie z którą **przeciętny poziom
+cholesterolu całkowitego różni się istotnie statystycznie między tymi
+dwiema grupami**.
+
+Na podstawie średnich można zauważyć, że osoby z chorobą wieńcową miały
+wyższy średni poziom cholesterolu całkowitego (**247,8**) niż osoby bez
+choroby wieńcowej (**214,6**).
+
+Na tym etapie stwierdzamy więc **istnienie istotnej statystycznie
+różnicy między grupami**, ale **nie oceniamy jeszcze siły ani
+praktycznego znaczenia tej różnicy**. Wielkość efektu zostanie oceniona
+w kolejnym etapie analizy.
+
+------------------------------------------------------------------------
+
+# Standaryzowana miara efektu - $d$ Cohena
+
+> **📖 p-wartość nie mierzy siły efektu**
+>
+> Klasyczny błąd: „p \< 0.0001, więc efekt jest ogromny". Nieprawda.
+> Mała p-wartość może wynikać z **ogromnej próby** przy śladowej
+> różnicy. Do mierzenia **siły** efektu służy $d$ Cohena:
+>
+> $$ d = \frac{\bar{x}_1 - \bar{x}_2}{s_p} $$
+>
+> |       | d           |
+> |-------|-------------|
+> | 0.2   | mały        |
+> | 0.5   | umiarkowany |
+> | 0.8   | duży        |
+> | ≥ 1.2 | bardzo duży |
+
+```{r cohens-d}
+d_result <- cohens_d(cholesterol_calkowity ~ choroba_wiencowa,
+                     data = analysis_df)
+d_result
+```
+
+Pakiet **effectsize** zwraca też **95 % przedział ufności** dla $d$.
+Jeżeli przedział nie obejmuje zera, efekt jest istotny statystycznie
+(wniosek zgodny z testem t).
+
+## Interpretacja w kontekście klinicznym
+
+Wynikową wartość $d$ odczytujemy w dwóch warstwach:
+
+1.  **Statystycznie** - jak bardzo grupy się różnią w jednostkach
+    odchylenia standardowego.
+2.  **Klinicznie** - czy ta różnica jest **praktycznie istotna**. Do
+    tego potrzebujemy wiedzy dziedzinowej: jaka różnica w cholesterolu
+    przekłada się na zmianę ryzyka zdarzeń sercowo-naczyniowych?
+
+> **⚠️ Pułapka**: wielkość efektu ≠ istotność kliniczna. Nawet duże $d$
+> może być klinicznie trywialne, jeśli różnica dotyczy wartości poniżej
+> progu interwencji.
+
+------------------------------------------------------------------------
+
+# Analiza mocy testu i planowanie próby
+
+> **📖 Przypomnienie teoretyczne - moc testu**
+>
+> **Moc testu** ($1 - \beta$) to prawdopodobieństwo wykrycia efektu,
+> który naprawdę istnieje. Innymi słowy: jeśli moc wynosi 0.80, to mamy
+> 80 % szans na uzyskanie istotnego wyniku przy założeniu, że efekt jest
+> realny.
+>
+> Cztery elementy są ze sobą powiązane — znając trzy, obliczamy czwarty:
+>
+> | Element           | Symbol      | Typowa wartość          |
+> |-------------------|-------------|-------------------------|
+> | Wielkość efektu   | $d$         | z danych lub oczekiwana |
+> | Poziom istotności | $\alpha$    | 0.05                    |
+> | Moc               | $1 - \beta$ | 0.80                    |
+> | Liczebność próby  | $n$         | ?                       |
+>
+> **Błąd I rodzaju** ($\alpha$): odrzucamy $H_0$, choć jest prawdziwa
+> (fałszywy alarm). **Błąd II rodzaju** ($\beta$): nie odrzucamy $H_0$,
+> choć jest fałszywa (przegapiony efekt).
+
+## Moc testu post-hoc
+
+Obliczamy, jaką moc miał nasz test t-Studenta przy obserwowanej
+wielkości efektu i faktycznych liczebnościach grup.
+
+```{r power-posthoc}
+n_nie <- sum(analysis_df$choroba_wiencowa == "nie")
+n_tak <- sum(analysis_df$choroba_wiencowa == "tak")
+d_obs <- abs(as.numeric(d_result$Cohens_d))
+
+power_result <- pwr.t2n.test(
+  n1   = n_nie,
+  n2   = n_tak,
+  d    = d_obs,
+  sig.level = 0.05,
+  alternative = "two.sided"
+)
+power_result
+```
+
+```{r power-interpretation}
+cat("Liczebność grupy 'nie':", n_nie, "\n")
+cat("Liczebność grupy 'tak':", n_tak, "\n")
+cat("Obserwowane d Cohena:  ", round(d_obs, 3), "\n")
+cat("Moc testu:             ", round(power_result$power, 3), "\n")
+```
+
+**Interpretacja**: moc `r round(power_result$power, 2)` oznacza, że przy
+obserwowanych liczebnościach i wielkości efektu mieliśmy
+`r round(power_result$power * 100)`% szans na wykrycie tej różnicy.
+Jeśli moc jest powyżej 0.80, próba była wystarczająca. Jeśli poniżej —
+istnieje ryzyko, że inne realne efekty mogły zostać przegapione.
+
+> **⚠️ Pułapka - analiza mocy post-hoc jest kontrowersyjna.** Wielu
+> statystyków argumentuje, że moc obliczona po fakcie (z obserwowanego
+> $d$) jest redundantna wobec p-wartości: jeśli p \< 0.05, moc jest
+> wysoka; jeśli p \> 0.05, moc jest niska. Prawdziwa wartość analizy
+> mocy leży w **planowaniu badania przed zebraniem danych** - co
+> pokazujemy poniżej.
+
+## Planowanie próby - ile obserwacji potrzebujemy?
+
+Odwrotne pytanie: gdybyśmy **planowali** badanie z góry, ile pacjentów w
+każdej grupie potrzebowalibyśmy, żeby wykryć efekt wielkości $d$ przy
+mocy 0.80 i $\alpha = 0.05$?
+
+```{r sample-size-planning}
+planned <- pwr.t.test(
+  d           = d_obs,
+  sig.level   = 0.05,
+  power       = 0.80,
+  type        = "two.sample",
+  alternative = "two.sided"
+)
+planned
+cat("\nMinimalna liczebność każdej grupy:", ceiling(planned$n), "\n")
+```
+
+## Krzywa mocy - jak moc zależy od liczebności próby
+
+```{r power-curve, fig.height = 4.5}
+n_range <- seq(10, 300, by = 5)
+power_values <- map_dbl(n_range, ~ pwr.t.test(
+  n = .x, d = d_obs, sig.level = 0.05, type = "two.sample"
+)$power)
+
+ggplot(tibble(n = n_range, power = power_values), aes(x = n, y = power)) +
+  geom_line(colour = "#4C78A8", linewidth = 1.2) +
+  geom_hline(yintercept = 0.80, linetype = "dashed", colour = "red") +
+  annotate("text", x = max(n_range) * 0.85, y = 0.83,
+           label = "Moc = 0.80", colour = "red", size = 3.5) +
+  geom_vline(xintercept = ceiling(planned$n), linetype = "dotted", colour = "grey40") +
+  labs(title = "Krzywa mocy testu t dla obserwowanego efektu",
+       subtitle = paste0("d = ", round(d_obs, 2), ", α = 0.05"),
+       x = "Liczebność każdej grupy (n)",
+       y = "Moc (1 − β)") +
+  theme_minimal()
+```
+
+Krzywa mocy wizualizuje fundamentalny kompromis w planowaniu badań: **im
+mniejszy efekt chcemy wykryć, tym większej próby potrzebujemy**.
+Czerwona linia oznacza konwencjonalny próg mocy 0.80.
+
+------------------------------------------------------------------------
+
+# Podsumowanie ścieżki analizy
+
+Przeszliśmy pełną ścieżkę od surowego pliku Excel do **merytorycznie
+uzasadnionego wniosku** statystycznego. Każdy krok **zasilał** kolejny:
+
+1.  **Skale pomiarowe** → decyzja o typach zmiennych i narzędziach.
+2.  **Diagnostyka jakości** → decyzja, co usuwać, a co imputować.
+3.  **Rozkłady empiryczne** → wiedza o kształcie, która dyktowała...
+4.  **Dopasowanie teoretyczne** (\*) → ...uzasadnienie doboru testów.
+5.  **Obsługa Y** → usunięcie braków (bez konfabulacji).
+6.  **Imputacja X** → mediana vs kNN w zależności od odsetka braków.
+7.  **Winsoryzacja** (\*) → neutralizacja wpływu wartości odstających.
+8.  **Test istotności** → sprawdzenie założeń + właściwy test +
+    porównanie z nieparametrycznym.
+9.  **Wielkość efektu** → odpowiedź na pytanie „jak bardzo".
+10. **Analiza mocy** (\*) → odpowiedź na pytanie „czy próba wystarczyła"
+    i „ile potrzebujemy następnym razem".
+
+W realnej pracy analityka ponad połowa czasu jest poświęcona na kroki
+1–7. Te „przygotowawcze" czynności **decydują o wiarygodności** całej
+analizy — test statystyczny i wielkość efektu to tylko zwieńczenie
+dobrze wykonanej roboty na danych.
+
+## Jak zaraportować wynik
+
+W tekście publikacji lub raportu piszemy:
+
+> *Średni poziom cholesterolu w grupie bez choroby wieńcowej wyniósł*
+> $M_1$ ± $SD_1$ mg/dl, a w grupie z chorobą — $M_2$ ± $SD_2$ mg/dl.
+> Różnica była istotna statystycznie, $t(df) = ...$, $p = ...$, $d$
+> Cohena $= ...$, 95% CI $[..., ...]$. Analiza mocy wykazała, że przy
+> obserwowanej wielkości efektu moc testu wyniosła ... .
+
+------------------------------------------------------------------------
+
+*Powodzenia z zadaniami! Zadania do samodzielnej realizacji znajdziesz w
+osobnych plikach.*

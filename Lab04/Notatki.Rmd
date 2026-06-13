@@ -1,0 +1,92 @@
+You'll see that there are 5 columns - state, zcta5 (a 5-digit zip code identifier), County (the name
+| of the county in which the zip code resides), PctUrban (the percentage of the zip code that is
+| considered urban), and FIPS (a 5-digit identifier for the county).
+
+
+dplyr
+
+cran <- tibble::as_tibble(mydf)
+Selecting specfific cols:  
+```R
+# to return only selected columns
+select(cran, ip_id, package, country)
+select(cran, country:r_arch)  shows exactly the same order 
+select(cran, -time)
+
+ -5:20
+ -(5:20)
+ # to return only selected rows
+ filter(cran, package == "swirl") 
+ 
+arrange(cran2, ip_id)  
+arrange(cran2, desc(ip_id)) 
+arrange(cran2, country, desc(r_version), ip_id)
+
+Zapis infiksowy musi miec nawiasy a postfixowy jest nadal poprawny ale trudniejszy dla czlowieka, aczkolwiek mozna nie uzywac nawiasow
+
+Adding new column out of the other
+mutate(cran3, size_mb = size / 2^20)
+
+Getting only result from the table
+summarize(cran, avg_bytes = mean(size))
+
+Teraz bedziemy miec zmienna taka sama tabelke ale z pogrupowanymi danymi w metadanych:
+by_package<-group_by(cran, package)
+
+pack_sum <- summarize(by_package,
+                      count = n(),
+                      unique = n_distinct(ip_id),
+                      countries = n_distinct(country),
+                      avg_bytes = mean(size))
+```
+  |===============================                                                               |  33%
+| The 'count' column, created with n(), contains the total number of rows (i.e. downloads) for each
+| package. The 'unique' column, created with n_distinct(ip_id), gives the total number of unique
+| downloads for each package, as measured by the number of distinct ip_id's. The 'countries' column,
+| created with n_distinct(country), provides the number of countries in which each package was
+| downloaded. And finally, the 'avg_bytes' column, created with mean(size), contains the mean download
+| size (in bytes) for each package.
+
+
+Missing vlaues == NA
+detected by: is.na()
+5:20 - gets as from 5 to 20 (both inclusive)
+
+
+
+```R
+To nicely view data of tible
+View(top_counts)
+
+Dostajemy kwantyl danych w kolumnie unique:
+quantile(pack_sum$unique, probs = 0.99)
+```
+
+Chaining:
+```R
+result3 <-
+  cran %>%
+  group_by(package) %>%
+  summarize(count = n(),
+            unique = n_distinct(ip_id),
+            countries = n_distinct(country),
+            avg_bytes = mean(size)
+  ) %>%
+  filter(countries > 60) %>%
+  arrange(desc(countries), avg_bytes)
+```
+
+Pivoting table:
+```R
+pivot_longer(data = students,cols = -grade, names_to = "sex", values_to = "count")
+```
+| It's important to understand what each argument to pivot_longer() means. The data argument, students,
+| gives the name of the original dataset. The cols argument, -grade, says that we want to pivot all
+| columns EXCEPT grade. The names_to and values_to arguments specify the column names for our tidy
+| dataset: sex and count.
+```
+res <- pivot_longer(students2, cols = -grade, names_to = "sex_class", values_to = "count")
+rozdziela kolumny:
+data = res, col = sex_class, into = c("sex", "class")
+```
+

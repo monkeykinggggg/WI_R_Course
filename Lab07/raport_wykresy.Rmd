@@ -1,0 +1,97 @@
+---
+title: "Raport z wykresami 1"
+author: "Joanna"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+# PONIZSZEGO NIE MODYFIKUJ
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+## POPRAW SCIEZKE DO PLIKU
+cel <- drop_na(read_csv("cel_volden_wiseman.csv"))
+```
+
+Twoim celem jest odtworzenie tych wykresów, stworzonych przy użyciu danych Center of Legislative Effectiveness.
+
+**WAŻNE: Przefiltruj dane, aby wyświetlić informacje tylko dla 115. Kongresu.**
+
+## Wykres 1
+
+**Wskazówki:**
+
+* Dla osi y użyj zmiennej "all_pass".
+* Dla osi x użyj zmiennej "dwnom1".
+* Upewnij się, że przekodujesz dane dla zmiennej "female" i zmienisz jej nazwę na "Gender", aby wygenerować poprawne etykiety dla legendy.
+* Ustaw estetykę koloru w funkcji ggplot(), aby kolor kropek zmieniał się w zależności od płci (Gender).
+* Upewnij się, że etykiety osi są poprawne.
+
+
+```{r wykres1,echo=TRUE}
+# Najpierw filtrujemy dane dla 115. Kongresu i tworzymy czytelne etykiety (Gender i majority_status)
+cel_115 <- cel %>%
+  filter(congress == 115) %>%
+  mutate(
+    Gender = ifelse(female == 1, "Kobieta", "Mężczyzna"),
+    majority_status = ifelse(majority == 1, "Większość", "Mniejszość")
+  )
+
+# Rysowanie Wykresu 1
+ggplot(data = cel_115, aes(x = dwnom1, y = all_pass, color = Gender)) +
+  geom_point(alpha = 0.7) +
+  labs(
+    x = "Wynik DW-NOMINATE (Ideologia)",
+    y = "Liczba uchwalonych ustaw (all_pass)",
+    color = "Płeć"
+  )
+```
+
+## Wykres 2
+
+**Wskazówki:**
+
+* Dla osi x użyj zmiennej "votepct".
+* Dla osi y użyj zmiennej "all_pass".
+* Upewnij się, że przekodujesz dane dla zmiennej "female", aby wygenerować poprawne etykiety dla legendy. Zmień nazwę tej kolumny na "Gender". (mogłeś to już zrobić w poprzednim zadaniu)
+* Upewnij się, że przekodujesz dane dla zmiennej "majority", aby wygenerować poprawne etykiety dla wykresów podzielonych na panele (ang. *facetted figures*).
+* Ustaw estetykę koloru w funkcji ggplot(), aby kolor kropek zmieniał się w zależności od płci (Gender).
+* Użyj `scale_color_manual()`, aby ustawić kolory na zielony dla mężczyzn i pomarańczowy dla kobiet.
+* Upewnij się, że etykiety osi są poprawne.
+
+
+
+```{r wykres2,echo=TRUE}
+# Używamy gotowego zbioru cel_115 z poprzedniego kroku.
+# Funkcja facet_wrap() dzieli wykres na panele według statusu partii.
+ggplot(data = cel_115, aes(x = votepct, y = all_pass, color = Gender)) +
+  geom_point(alpha = 0.7) +
+  facet_wrap(~ majority_status) +
+  scale_color_manual(values = c("Mężczyzna" = "green", "Kobieta" = "orange")) +
+  labs(
+    x = "Procent zdobytych głosów (votepct)",
+    y = "Liczba uchwalonych ustaw (all_pass)",
+    color = "Płeć"
+  )
+```
+
+## Wykres 3
+
+**Wskazówki:**
+
+* Dla osi y użyj zmiennej "les".
+* Upewnij się, że przekodujesz dane dla zmiennej "majority", aby wygenerować poprawne etykiety. (mogłeś to już zrobić w poprzednim zadaniu)
+* Upewnij się, że etykiety osi i tytuł wykresu są poprawne.
+
+
+
+```{r wykres3,echo=TRUE}
+# Rysujemy wykres pudełkowy (boxplot) dla wskaźnika LES w zależności od statusu większości
+ggplot(data = cel_115, aes(x = majority_status, y = les, fill = majority_status)) +
+  geom_boxplot(alpha = 0.6) +
+  labs(
+    x = "Status w Kongresie",
+    y = "Wskaźnik efektywności legislacyjnej (les)",
+    title = "Efektywność legislacyjna a status partii w 115. Kongresie"
+  ) +
+  theme(legend.position = "none") # Ukrywamy legendę, bo etykiety osi x wystarczą
+```

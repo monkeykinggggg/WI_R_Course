@@ -1,0 +1,109 @@
+---
+title: "Peer Review Three"
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: columns
+    vertical_layout: fill
+runtime: shiny
+---
+
+```{r setup, include=FALSE}
+library(flexdashboard)
+library(tidyverse)
+library(plotly)
+library(shiny)
+
+dat<-read_csv(url("https://www.dropbox.com/s/4ebgnkdhhxo5rac/cel_volden_wiseman%20_coursera.csv?raw=1"))
+
+dat$Party<-recode(dat$dem,`1`="Democrat",`0`="Republican")
+
+
+#######WSKAZÓWKA: dla Wykresu D będziesz musiał/a ustawić wysokość funkcji renderPlot, używając argumentu height. Spróbuj wartości 750.
+
+#####niektóre funkcje zarządzania danymi są już dołączone. Musisz dodać funkcje wizualizacji.
+
+```
+
+
+Page 1
+======
+
+### Chart A
+
+
+```{r}
+dat %>% 
+  drop_na() %>% 
+  filter(year>1979) %>% 
+  group_by(year,Party) %>% 
+  summarise(passed=sum(all_pass)) %>% 
+  ggplot(aes(year, passed, fill = Party)) + geom_area() + labs(x="Year", y="All Bills Passed", title="Number of Bills Passed Since 1980") + scale_fill_manual(values=c("Democrat" = "blue", "Republican" = "red"))
+
+
+```
+
+Page 2
+======
+
+
+Column
+------
+### Chart B
+
+```{r}
+
+dat%>%
+  drop_na()%>%
+  filter(congress==110) %>%
+  ggplot(aes(votepct, all_pass, color = Party)) + geom_point() + geom_smooth() + labs(title = "Passage and Vote Pct., 110th Congress", x = "Vote Pct.", y = "All Pass") +scale_color_manual(values=c("Democrat" = "blue", "Republican" = "red"))
+```
+
+
+Column
+------
+### Chart C
+
+```{r}
+dat%>%
+  drop_na()%>%
+  filter(congress==110) %>%
+  ggplot(aes(dwnom1, all_pass, color = Party)) + geom_point() + geom_smooth() + labs(title = "Passage and Ideology, 110th Congress", x = "DW Nominate.", y = "All Pass") + scale_color_manual(values=c("Democrat" = "blue", "Republican" = "red"))
+```
+
+Page 3
+======
+
+Input {.sidebar}
+----
+### Chart D
+```{r}
+selectInput(
+"state_name",
+"State",
+choices = sort(unique(dat$st_name)),
+selected = sort(unique(dat$st_name)),
+multiple = TRUE
+)
+```
+
+Column
+----
+```{r}
+
+####hint: this figure uses selectInput with the multiple option set to true and with the options set up so that all states are initially selected.
+renderPlot({
+  dat %>% 
+  filter(congress==110) %>%
+  filter(st_name %in% input$state_name) %>%
+  group_by(st_name) %>% 
+  summarise(passed=sum(all_pass)) %>%
+  ggplot(aes(passed, st_name)) + 
+  geom_col() + 
+  labs(title = "Total Bills Passed by State Delegations, 110th Congress",
+         x = "Total Bills Passed Per State", 
+         y = "State Name")
+  
+  },height = 750
+)
+```
+
